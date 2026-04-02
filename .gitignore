@@ -1,3 +1,12 @@
 /alembic/
 /.venv/
 /student_progress.db
+/.idea/.gitignore
+/.idea/ASU_StudentProgress.iml
+/frontend/dist/assets/index-84400a6e.js
+/.idea/misc.xml
+/.idea/modules.xml
+/frontend/dist/assets/index-7bdf9e8a.css
+/.idea/inspectionProfiles/profiles_settings.xml
+/.idea/vcs.xml
+/.idea/inspectionProfiles/Project_Default.xml
