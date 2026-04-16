@@ -3,6 +3,10 @@ import { apiAdminGet, apiAdminPost, apiAdminPut, apiAdminDelete } from '../api.j
 import GenericCrudForm from '../components/GenericCrudForm.jsx'
 import GenericCrudTable from '../components/GenericCrudTable.jsx'
 
+function hideIdFields(columns) {
+  return columns
+}
+
 function Spinner({ message = 'Загрузка...' }) {
   return (
     <div className="flex flex-col items-center justify-center h-48 gap-3">
@@ -44,6 +48,12 @@ const SECTION_TABS = [
   { key: 'users', label: 'Пользователи' },
   { key: 'group-subjects', label: 'Дисциплины групп' },
   { key: 'appeals', label: 'Апелляции' },
+  { key: 'appeal-statuses', label: 'Статусы апелляций' },
+  { key: 'faculties', label: 'Факультеты' },
+  { key: 'specializations', label: 'Специальности' },
+  { key: 'enrollment-reasons', label: 'Основания зачисления' },
+  { key: 'discipline-groups', label: 'Группы и преподаватели' },
+  { key: 'student-groups', label: 'Группы студентов' },
 ]
 
 export default function AdminDashboard() {
@@ -73,6 +83,12 @@ export default function AdminDashboard() {
       case 'users': return <UsersSection {...props} />
       case 'group-subjects': return <GroupSubjectsSection {...props} />
       case 'appeals': return <AppealsSection {...props} />
+      case 'appeal-statuses': return <AppealStatusesSection {...props} />
+      case 'faculties': return <FacultiesSection {...props} />
+      case 'specializations': return <SpecializationsSection {...props} />
+      case 'enrollment-reasons': return <EnrollmentReasonsSection {...props} />
+      case 'discipline-groups': return <DisciplineGroupsSection {...props} />
+      case 'student-groups': return <StudentGroupsSection {...props} />
       default: return null
     }
   }
@@ -201,22 +217,101 @@ function CrudSection({ title, endpoint, fields, columns, onNotify, onError, extr
 // ──── Секции ────
 
 function GroupsSection({ onNotify, onError }) {
+  const [faculties, setFaculties] = useState([])
+  const [specializations, setSpecializations] = useState([])
+  const [data, setData] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editItem, setEditItem] = useState(null)
+  const [formLoading, setFormLoading] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [g, f, s] = await Promise.all([
+        apiAdminGet('groups'),
+        apiAdminGet('faculties'),
+        apiAdminGet('specializations')
+      ])
+      setData(g)
+      setFaculties(f)
+      setSpecializations(s)
+    } catch (e) { onError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const [values, setValues] = useState({})
+
+  if (loading) return <Spinner />
+
+  const filteredSpecs = () => {
+    const facId = values?.faculty_id || (editItem?.faculty_id)
+    if (!facId) return specializations
+    return specializations.filter(s => s.faculty_id === facId)
+  }
+
+  const handleSubmit = async (values) => {
+    setFormLoading(true)
+    try {
+      if (editItem) {
+        await apiAdminPut('groups', editItem.id, values)
+        onNotify('Группа обновлена')
+      } else {
+        await apiAdminPost('groups', values)
+        onNotify('Группа добавлена')
+      }
+      setShowForm(false)
+      setEditItem(null)
+      load()
+    } catch (e) { onError(e.message) }
+    finally { setFormLoading(false) }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Удалить группу?')) return
+    try {
+      await apiAdminDelete('groups', id)
+      onNotify('Группа удалена')
+      load()
+    } catch (e) { onError(e.message) }
+  }
+
   return (
-    <CrudSection
-      title="Группы"
-      endpoint="groups"
-      fields={[
-        { key: 'name', label: 'Название', placeholder: 'ИС-201', required: true },
-        { key: 'course', label: 'Курс', placeholder: '1' },
-      ]}
-      columns={[
-        { key: 'id', label: 'ID' },
-        { key: 'name', label: 'Название' },
-        { key: 'course', label: 'Курс' },
-      ]}
-      onNotify={onNotify}
-      onError={onError}
-    />
+    <div>
+      <SectionHeader
+        title="Группы"
+        count={data.length}
+        onAdd={() => { setEditItem(null); setShowForm(true); setValues({}) }}
+        onRefresh={load}
+      />
+      {showForm && (
+        <div className="mb-4">
+          <GenericCrudForm
+            fields={[
+              { key: 'name', label: 'Название', placeholder: 'ИС-201', required: true },
+              { key: 'course', label: 'Курс', placeholder: '1' },
+              { key: 'faculty_id', label: 'Факультет', type: 'select', options: faculties.map(f => ({ value: f.id, label: f.name })) },
+              { key: 'specialization_id', label: 'Специальность', type: 'select', options: filteredSpecs().map(s => ({ value: s.id, label: s.name })) },
+            ]}
+            initialValues={editItem || {}}
+            onSubmit={handleSubmit}
+            onCancel={() => { setShowForm(false); setEditItem(null) }}
+            loading={formLoading}
+          />
+        </div>
+      )}
+<GenericCrudTable
+        columns={[
+          { key: 'id', label: 'ID' },
+          { key: 'name', label: 'Название' },
+          { key: 'description', label: 'Описание' },
+        ]}
+        data={data}
+        onDelete={handleDelete}
+      />
+    </div>
   )
 }
 
@@ -538,12 +633,22 @@ function GroupSubjectsSection({ onNotify, onError }) {
 
 function AppealsSection({ onNotify, onError }) {
   const [data, setData] = useState([])
+  const [statuses, setStatuses] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editItem, setEditItem] = useState(null)
+  const [formLoading, setFormLoading] = useState(false)
 
   const load = async () => {
     setLoading(true)
-    try { setData(await apiAdminGet('appeals')) }
-    catch (e) { onError(e.message) }
+    try {
+      const [a, s] = await Promise.all([
+        apiAdminGet('appeals'),
+        apiAdminGet('appeal-statuses')
+      ])
+      setData(a)
+      setStatuses(s)
+    } catch (e) { onError(e.message) }
     finally { setLoading(false) }
   }
 
@@ -551,24 +656,16 @@ function AppealsSection({ onNotify, onError }) {
 
   if (loading) return <Spinner />
 
-  const handleProcess = async (appeal, status) => {
-    try {
-      await apiAdminPut('appeals', appeal.id, { status })
-      onNotify(`Апелляция ${status === 'approved' ? 'одобрена' : 'отклонена'}`)
-      load()
-    } catch (e) { onError(e.message) }
-  }
-
-  const getStatusBadge = (status) => {
+  const getStatusBadge = (statusId) => {
+    const status = statuses.find(s => s.id === statusId)
     const styles = {
-      pending: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400',
-      approved: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400',
-      rejected: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400',
+      'На рассмотрении': 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400',
+      'Удовлетворена': 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400',
+      'Отклонена': 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400',
     }
-    const labels = { pending: 'На рассмотрении', approved: 'Одобрено', rejected: 'Отклонено' }
     return (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || 'bg-gray-100 dark:bg-dark-border text-gray-800 dark:text-dark-muted'}`}>
-        {labels[status] || status}
+      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[status?.name] || 'bg-gray-100 dark:bg-dark-border text-gray-800 dark:text-dark-muted'}`}>
+        {status?.name || statusId}
       </span>
     )
   }
@@ -576,21 +673,351 @@ function AppealsSection({ onNotify, onError }) {
   return (
     <div>
       <SectionHeader title="Апелляции" count={data.length} showAdd={false} onRefresh={load} />
+      {showForm && (
+        <div className="mb-4 p-4 bg-gray-50 dark:bg-dark-input rounded-lg">
+          <GenericCrudForm
+            fields={[
+              { key: 'status_id', label: 'Статус', type: 'select', options: statuses.map(s => ({ value: s.id, label: s.name })), required: true },
+              { key: 'comment', label: 'Комментарий', type: 'textarea' },
+            ]}
+            initialValues={editItem || {}}
+            onSubmit={async values => {
+              await apiAdminPut('appeals', editItem.id, values)
+              onNotify('Апелляция обновлена')
+              setShowForm(false)
+              setEditItem(null)
+              load()
+            }}
+            onCancel={() => { setShowForm(false); setEditItem(null) }}
+            loading={formLoading}
+          />
+        </div>
+      )}
       <GenericCrudTable
         columns={[
           { key: 'id', label: 'ID' },
-          { key: 'student_id', label: 'ID студента' },
-          { key: 'subject_id', label: 'ID предмета' },
+          { key: 'student_id', label: 'Студент' },
+          { key: 'subject_id', label: 'Предмет' },
           { key: 'description', label: 'Описание' },
-          { key: 'status', label: 'Статус', render: v => getStatusBadge(v) },
-          { key: 'created_at', label: 'Дата подачи', render: v => v ? new Date(v).toLocaleString('ru-RU') : '—' },
+          { key: 'status_id', label: 'Статус' },
+          { key: 'created_at', label: 'Дата', render: v => v ? new Date(v).toLocaleString('ru-RU') : '—' },
         ]}
         data={data}
-        onProcess={item => {
-          if (item.status !== 'pending') return
-          const action = prompt('Одобрить (approved) или отклонить (rejected)?', 'approved')
-          if (action === 'approved' || action === 'rejected') handleProcess(item, action)
-        }}
+        onEdit={item => { setEditItem(item); setShowForm(true) }}
+      />
+    </div>
+  )
+}
+
+function AppealStatusesSection({ onNotify, onError }) {
+  return (
+    <CrudSection
+      title="Статусы апелляций"
+      endpoint="appeal-statuses"
+      fields={[
+        { key: 'name', label: 'Название', placeholder: 'На рассмотрении', required: true },
+        { key: 'description', label: 'Описание', placeholder: 'Апелляция на рассмотрении' },
+      ]}
+      columns={hideIdFields([
+        { key: 'name', label: 'Название' },
+        { key: 'description', label: 'Описание' },
+      ])}
+      onNotify={onNotify}
+      onError={onError}
+    />
+  )
+}
+
+function FacultiesSection({ onNotify, onError }) {
+  return (
+    <CrudSection
+      title="Факультеты"
+      endpoint="faculties"
+      fields={[
+        { key: 'name', label: 'Название', placeholder: 'Факультет информатики', required: true },
+        { key: 'code', label: 'Код', placeholder: 'FI' },
+      ]}
+      columns={hideIdFields([
+        { key: 'name', label: 'Название' },
+        { key: 'code', label: 'Код' },
+      ])}
+      onNotify={onNotify}
+      onError={onError}
+    />
+  )
+}
+
+function SpecializationsSection({ onNotify, onError }) {
+  const [faculties, setFaculties] = useState([])
+  const [data, setData] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editItem, setEditItem] = useState(null)
+  const [formLoading, setFormLoading] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [s, f] = await Promise.all([apiAdminGet('specializations'), apiAdminGet('faculties')])
+      setData(s)
+      setFaculties(f)
+    } catch (e) { onError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  if (loading) return <Spinner />
+
+  const handleSubmit = async (values) => {
+    setFormLoading(true)
+    try {
+      if (editItem) {
+        await apiAdminPut('specializations', editItem.id, values)
+        onNotify('Специальность обновлена')
+      } else {
+        await apiAdminPost('specializations', values)
+        onNotify('Специальность добавлена')
+      }
+      setShowForm(false)
+      setEditItem(null)
+      load()
+    } catch (e) { onError(e.message) }
+    finally { setFormLoading(false) }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Удалить специальность?')) return
+    try {
+      await apiAdminDelete('specializations', id)
+      onNotify('Специальность удалена')
+      load()
+    } catch (e) { onError(e.message) }
+  }
+
+  return (
+    <div>
+      <SectionHeader
+        title="Специальности"
+        count={data.length}
+        onAdd={() => { setEditItem(null); setShowForm(true) }}
+        onRefresh={load}
+      />
+      {showForm && (
+        <div className="mb-4">
+          <GenericCrudForm
+            fields={[
+              { key: 'name', label: 'Название', required: true },
+              { key: 'code', label: 'Код' },
+              { key: 'faculty_id', label: 'Факультет', type: 'select', options: faculties.map(f => ({ value: f.id, label: f.name })), required: true },
+            ]}
+            initialValues={editItem || {}}
+            onSubmit={handleSubmit}
+            onCancel={() => { setShowForm(false); setEditItem(null) }}
+            loading={formLoading}
+          />
+        </div>
+      )}
+      <GenericCrudTable
+        columns={hideIdFields([
+          { key: 'name', label: 'Название' },
+          { key: 'code', label: 'Код' },
+          { key: 'faculty', label: 'Факультет', render: v => v?.name ?? '—' },
+        ])}
+        data={data}
+        onEdit={item => { setEditItem(item); setShowForm(true) }}
+        onDelete={handleDelete}
+      />
+    </div>
+  )
+}
+
+function EnrollmentReasonsSection({ onNotify, onError }) {
+  return (
+    <CrudSection
+      title="Основания зачисления"
+      endpoint="enrollment-reasons"
+      fields={[
+        { key: 'name', label: 'Название', placeholder: 'Поступление', required: true },
+        { key: 'description', label: 'Описание' },
+      ]}
+      columns={hideIdFields([
+        { key: 'name', label: 'Название' },
+        { key: 'description', label: 'Описание' },
+      ])}
+      onNotify={onNotify}
+      onError={onError}
+    />
+  )
+}
+
+function DisciplineGroupsSection({ onNotify, onError }) {
+  const [data, setData] = useState([])
+  const [disciplines, setDisciplines] = useState([])
+  const [groups, setGroups] = useState([])
+  const [teachers, setTeachers] = useState([])
+  const [semesters, setSemesters] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [formLoading, setFormLoading] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [dg, d, g, t, s] = await Promise.all([
+        apiAdminGet('discipline-groups'),
+        apiAdminGet('subjects'),
+        apiAdminGet('groups'),
+        apiAdminGet('teachers'),
+        apiAdminGet('semesters'),
+      ])
+      setData(dg)
+      setDisciplines(d)
+      setGroups(g)
+      setTeachers(t)
+      setSemesters(s)
+    } catch (e) { onError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  if (loading) return <Spinner />
+
+  const handleSubmit = async (values) => {
+    setFormLoading(true)
+    try {
+      await apiAdminPost('discipline-groups', values)
+      onNotify('Добавлено')
+      setShowForm(false)
+      load()
+    } catch (e) { onError(e.message) }
+    finally { setFormLoading(false) }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Удалить?')) return
+    try { await apiAdminDelete('discipline-groups', id); onNotify('Удалено'); load() }
+    catch (e) { onError(e.message) }
+  }
+
+  return (
+    <div>
+      <SectionHeader title="Группы и преподаватели" count={data.length} onAdd={() => setShowForm(true)} onRefresh={load} />
+      {showForm && (
+        <div className="mb-4">
+          <GenericCrudForm
+            fields={[
+              { key: 'discipline_id', label: 'Дисциплина', type: 'select', options: disciplines.map(d => ({ value: d.id, label: d.name })), required: true },
+              { key: 'group_id', label: 'Группа', type: 'select', options: groups.map(g => ({ value: g.id, label: g.name })), required: true },
+              { key: 'teacher_id', label: 'Преподаватель', type: 'select', options: [{ value: '', label: '— Не выбран —' }, ...teachers.map(t => ({ value: t.id, label: t.department }))] },
+              { key: 'semester_id', label: 'Семестр', type: 'select', options: semesters.map(s => ({ value: s.id, label: s.year + ' — ' + s.term })), required: true },
+              { key: 'academic_year', label: 'Учебный год', placeholder: '2024-2025' },
+            ]}
+            onSubmit={handleSubmit}
+            onCancel={() => setShowForm(false)}
+            loading={formLoading}
+          />
+        </div>
+      )}
+      <GenericCrudTable
+        columns={[
+          { key: 'id', label: 'ID' },
+          { key: 'discipline_id', label: 'Дисциплина' },
+          { key: 'group_id', label: 'Группа' },
+          { key: 'teacher_id', label: 'Преподаватель' },
+          { key: 'semester_id', label: 'Семестр' },
+        ]}
+        data={data}
+        onDelete={handleDelete}
+      />
+    </div>
+  )
+}
+
+function StudentGroupsSection({ onNotify, onError }) {
+  const [data, setData] = useState([])
+  const [students, setStudents] = useState([])
+  const [groups, setGroups] = useState([])
+  const [reasons, setReasons] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [formLoading, setFormLoading] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [sg, s, g, r] = await Promise.all([
+        apiAdminGet('student-groups'),
+        apiAdminGet('students'),
+        apiAdminGet('groups'),
+        apiAdminGet('enrollment-reasons'),
+      ])
+      setData(sg)
+      setStudents(s)
+      setGroups(g)
+      setReasons(r)
+    } catch (e) { onError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  if (loading) return <Spinner />
+
+  const handleSubmit = async (values) => {
+    setFormLoading(true)
+    try {
+      if (values.is_current) {
+        for (const sg of data.filter(d => d.student_id === values.student_id && d.is_current)) {
+          await apiAdminPut('student-groups', sg.id, { is_current: false })
+        }
+      }
+      await apiAdminPost('student-groups', values)
+      onNotify('Добавлено')
+      setShowForm(false)
+      load()
+    } catch (e) { onError(e.message) }
+    finally { setFormLoading(false) }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Удалить?')) return
+    try { await apiAdminDelete('student-groups', id); onNotify('Удалено'); load() }
+    catch (e) { onError(e.message) }
+  }
+
+  return (
+    <div>
+      <SectionHeader title="Группы студентов" count={data.length} onAdd={() => setShowForm(true)} onRefresh={load} />
+      {showForm && (
+        <div className="mb-4">
+          <GenericCrudForm
+            fields={[
+              { key: 'student_id', label: 'Студент', type: 'select', options: students.map(s => ({ value: s.id, label: 'ID:' + s.id })), required: true },
+              { key: 'group_id', label: 'Группа', type: 'select', options: groups.map(g => ({ value: g.id, label: g.name })), required: true },
+              { key: 'reason_id', label: 'Основание', type: 'select', options: reasons.map(r => ({ value: r.id, label: r.name })), required: true },
+              { key: 'enrollment_date', label: 'Дата зачисления', type: 'date' },
+              { key: 'dropout_date', label: 'Дата отчисления', type: 'date' },
+              { key: 'is_current', label: 'Текущий', type: 'select', options: [{ value: false, label: 'Нет' }, { value: true, label: 'Да' }] },
+            ]}
+            onSubmit={handleSubmit}
+            onCancel={() => setShowForm(false)}
+            loading={formLoading}
+          />
+        </div>
+      )}
+      <GenericCrudTable
+        columns={[
+          { key: 'student_id', label: 'Студент' },
+          { key: 'group_id', label: 'Группа', render: v => v === 1 ? 'ИС-21' : v === 2 ? 'ИС-22' : v === 3 ? 'ИС-23' : v === 4 ? 'ПИ-21' : v === 5 ? 'ПИ-22' : v === 6 ? 'ПИБ-21' : v },
+          { key: 'reason_id', label: 'Основание', render: v => v === 1 ? 'Поступление' : v === 2 ? 'Восстановление' : v === 3 ? 'Перевод' : v },
+          { key: 'enrollment_date', label: 'Зачислен' },
+          { key: 'dropout_date', label: 'Отчислен' },
+          { key: 'is_current', label: 'Текущий', render: v => v ? '✓' : '' },
+        ]}
+        data={data}
+        onDelete={handleDelete}
       />
     </div>
   )

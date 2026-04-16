@@ -138,7 +138,11 @@ export default function GenericCrudTable({
                 <tr key={item[primaryKey]} className="border-b border-gray-100 dark:border-dark-border/50 last:border-0 hover:bg-gray-50 dark:hover:bg-dark-input/50 transition-colors">
                   {columns.map(col => (
                     <td key={col.key} className="py-3 pr-4 text-gray-700 dark:text-gray-300">
-                      {col.render ? col.render(item[col.key], item) : (item[col.key] ?? '—')}
+                      {col.render 
+                        ? col.render(item[col.key], item) 
+                        : (typeof item[col.key] === 'object' && item[col.key] !== null)
+                          ? JSON.stringify(item[col.key])
+                          : (item[col.key] ?? '—')}
                     </td>
                   ))}
                   {hasActions && (

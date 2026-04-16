@@ -64,19 +64,15 @@ function GradeBadge({ value }) {
 }
 
 function StatusBadge({ status }) {
+  const statusName = typeof status === 'object' ? status?.name : status
   const styles = {
-    pending: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
-    approved: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
-    rejected: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
-  }
-  const labels = {
-    pending: 'На рассмотрении',
-    approved: 'Одобрено',
-    rejected: 'Отклонено',
+    'На рассмотрении': 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
+    'Удовлетворена': 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+    'Отклонена': 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
   }
   return (
-    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${styles[status] || 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
-      {labels[status] || status}
+    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${styles[statusName] || 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
+      {statusName || 'Неизвестно'}
     </span>
   )
 }
@@ -127,7 +123,9 @@ function AppealForm({ subjects, onSuccess }) {
           >
             <option value="">Выберите предмет</option>
             {subjects.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
+              <option key={`${s.id}-${s.group_id}`} value={s.id}>
+                {s.name} {s.group_name ? `(${s.group_name})` : ''}
+              </option>
             ))}
           </select>
         </div>
@@ -167,6 +165,7 @@ export default function StudentDashboard() {
   const [attendanceStats, setAttendanceStats] = useState(null)
   const [subjects, setSubjects] = useState([])
   const [appeals, setAppeals] = useState([])
+  const [studentGroups, setStudentGroups] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
@@ -175,13 +174,14 @@ export default function StudentDashboard() {
     setLoading(true)
     setError(null)
     try {
-      const [g, s, r, a, subj, app] = await Promise.all([
+      const [g, s, r, a, subj, app, groups] = await Promise.all([
         apiStudentGet('grades'),
         apiStudentGet('stats'),
         apiStudentGet('ranking'),
         apiStudentGet('attendance/stats'),
         apiStudentGet('subjects'),
         apiStudentGet('appeals'),
+        apiStudentGet('groups'),
       ])
       setGrades(g)
       setStats(s)
@@ -189,6 +189,7 @@ export default function StudentDashboard() {
       setAttendanceStats(a)
       setSubjects(subj)
       setAppeals(app)
+      setStudentGroups(groups)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -227,7 +228,23 @@ export default function StudentDashboard() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Личный кабинет</h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Ваша успеваемость и статистика</p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-gray-500 dark:text-gray-400 text-sm">Ваша успеваемость и статистика</p>
+            {studentGroups.length > 0 && (
+              <div className="flex gap-1">
+                {studentGroups.map(sg => (
+                  <span key={sg.id} className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                    sg.is_current 
+                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' 
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                  }`}>
+                    {sg.group?.name}
+                    {sg.is_current && ' (текущая)'}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <button
           onClick={loadAll}
@@ -297,7 +314,7 @@ export default function StudentDashboard() {
                     <div key={g.id} className="flex items-center justify-between p-4 bg-gray-50/80 dark:bg-dark-input/80 rounded-xl border border-gray-100 dark:border-dark-border hover:shadow-sm transition-shadow">
                       <div>
                         <div className="font-medium text-gray-900 dark:text-white text-sm">
-                          {g.subject?.name ?? `Предмет #${g.subject_id}`}
+                          {g.discipline_group?.discipline?.name || '—'}
                         </div>
                         <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{g.control_type?.name}</div>
                       </div>
@@ -335,7 +352,7 @@ export default function StudentDashboard() {
                   <tbody>
                     {grades.map(g => (
                       <tr key={g.id} className="border-b border-gray-100 dark:border-dark-border last:border-0 hover:bg-gray-50/50 dark:hover:bg-dark-input/50 transition-colors">
-                        <td className="py-3 pr-4 font-medium text-gray-900 dark:text-white">{g.subject?.name ?? `#${g.subject_id}`}</td>
+                        <td className="py-3 pr-4 font-medium text-gray-900 dark:text-white">{g.discipline_group?.discipline?.name || '—'}</td>
                         <td className="py-3 pr-4 text-gray-500 dark:text-gray-400">{g.control_type?.name ?? `#${g.control_type_id}`}</td>
                         <td className="py-3 pr-4"><GradeBadge value={g.value} /></td>
                         <td className="py-3 text-gray-400 dark:text-gray-500 text-xs">{g.date ?? '—'}</td>
@@ -362,7 +379,7 @@ export default function StudentDashboard() {
                       <div key={a.id} className="p-4 bg-gray-50/80 dark:bg-dark-input/80 rounded-xl border border-gray-100 dark:border-dark-border">
                         <div className="flex items-center justify-between mb-2">
                           <span className="font-medium text-gray-900 dark:text-white text-sm">
-                            {a.subject?.name ?? `Предмет #${a.subject_id}`}
+                            {typeof a.subject === 'object' ? (a.subject?.name || a.subject) : a.subject}
                           </span>
                           <StatusBadge status={a.status} />
                         </div>

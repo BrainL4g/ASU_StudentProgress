@@ -11,10 +11,57 @@ import datetime
 class UserRole(Base):
     __tablename__ = "user_role"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)  # 'student', 'teacher', 'admin'
+    name = Column(String, unique=True, nullable=False)
 
     def __repr__(self):
         return f"<UserRole {self.name}>"
+
+
+class AppealStatus(Base):
+    __tablename__ = "appeal_status"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(String, nullable=True)
+
+    def __repr__(self):
+        return f"<AppealStatus {self.name}>"
+
+
+class Faculty(Base):
+    __tablename__ = "faculty"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    code = Column(String, nullable=True)
+
+    groups = relationship("Group", back_populates="faculty")
+    specializations = relationship("Specialization", back_populates="faculty")
+
+    def __repr__(self):
+        return f"<Faculty {self.name}>"
+
+
+class Specialization(Base):
+    __tablename__ = "specialization"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    code = Column(String, nullable=True)
+    faculty_id = Column(Integer, ForeignKey("faculty.id"), nullable=False)
+
+    faculty = relationship("Faculty", back_populates="specializations")
+    groups = relationship("Group", back_populates="specialization")
+
+    def __repr__(self):
+        return f"<Specialization {self.name}>"
+
+
+class EnrollmentReason(Base):
+    __tablename__ = "enrollment_reason"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(String, nullable=True)
+
+    def __repr__(self):
+        return f"<EnrollmentReason {self.name}>"
 
 
 class UserAccount(Base):
@@ -50,28 +97,56 @@ class Group(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False)
     course = Column(String)
+    faculty_id = Column(Integer, ForeignKey("faculty.id"), nullable=False)
+    specialization_id = Column(Integer, ForeignKey("specialization.id"), nullable=False)
 
+    faculty = relationship("Faculty", back_populates="groups")
+    specialization = relationship("Specialization", back_populates="groups")
     subjects = relationship("GroupSubject", back_populates="group")
 
     def __repr__(self):
         return f"<Group {self.name}>"
 
 
+class StudentGroup(Base):
+    __tablename__ = "student_group"
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("student.id"), nullable=False)
+    group_id = Column(Integer, ForeignKey("group.id"), nullable=False)
+    reason_id = Column(Integer, ForeignKey("enrollment_reason.id"), nullable=False)
+    enrollment_date = Column(Date, default=datetime.date.today)
+    dropout_date = Column(Date, nullable=True)
+    is_current = Column(Boolean, default=False)
+
+    student = relationship("Student", back_populates="group_links")
+    group = relationship("Group")
+    reason = relationship("EnrollmentReason")
+
+    def __repr__(self):
+        return f"<StudentGroup student={self.student_id} group={self.group_id}>"
+
+
 class Student(Base):
     __tablename__ = "student"
     id = Column(Integer, primary_key=True, index=True)
-    group_id = Column(Integer, ForeignKey("group.id"))
     enrollment_year = Column(Integer, default=datetime.datetime.now().year)
 
-    group = relationship("Group")
+    group_links = relationship("StudentGroup", back_populates="student")
     stats = relationship("StudentStats", back_populates="student", uselist=False)
     appeals = relationship("Appeal", back_populates="student")
     grades = relationship("Grade", back_populates="student")
     attendance = relationship("Attendance", back_populates="student")
     user_links = relationship("UserStudentLink", back_populates="student")
 
+    @property
+    def current_group(self):
+        for link in self.group_links:
+            if link.is_current:
+                return link.group
+        return None
+
     def __repr__(self):
-        return f"<Student id={self.id} group={self.group.name if self.group else None}>"
+        return f"<Student id={self.id}>"
 
 
 class Teacher(Base):
@@ -114,9 +189,31 @@ class Semester(Base):
     id = Column(Integer, primary_key=True, index=True)
     year = Column(Integer, nullable=False)
     term = Column(String, nullable=False)
+    is_current = Column(Boolean, default=True)
 
     def __repr__(self):
         return f"<Semester {self.year} {self.term}>"
+
+
+class DisciplineGroup(Base):
+    """Связь дисциплины с группами и преподавателями."""
+    __tablename__ = "discipline_group"
+    id = Column(Integer, primary_key=True, index=True)
+    discipline_id = Column(Integer, ForeignKey("subject.id"), nullable=False)
+    group_id = Column(Integer, ForeignKey("group.id"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("teacher.id"), nullable=True)
+    semester_id = Column(Integer, ForeignKey("semester.id"), nullable=False)
+    academic_year = Column(String, nullable=True)
+
+    discipline = relationship("Subject")
+    group = relationship("Group")
+    semester = relationship("Semester")
+    teacher = relationship("Teacher")
+    grades = relationship("Grade", back_populates="discipline_group")
+    attendances = relationship("Attendance", back_populates="discipline_group")
+
+    def __repr__(self):
+        return f"<DisciplineGroup discipline={self.discipline_id} group={self.group_id}>"
 
 
 class GroupSubject(Base):
@@ -126,13 +223,12 @@ class GroupSubject(Base):
     group_id = Column(Integer, ForeignKey("group.id"), nullable=False)
     subject_id = Column(Integer, ForeignKey("subject.id"), nullable=False)
     semester_id = Column(Integer, ForeignKey("semester.id"), nullable=False)
-    teacher_id = Column(Integer, ForeignKey("teacher.id"), nullable=True)  # Преподаватель, ведущий дисциплину
+    teacher_id = Column(Integer, ForeignKey("teacher.id"), nullable=True)
 
     group = relationship("Group", back_populates="subjects")
     subject = relationship("Subject", back_populates="groups")
     semester = relationship("Semester")
     teacher = relationship("Teacher", back_populates="group_subjects")
-    attendances = relationship("Attendance", back_populates="group_subject")
 
     def __repr__(self):
         return f"<GroupSubject group={self.group.name if self.group else None} subject={self.subject.code if self.subject else None}>"
@@ -142,20 +238,20 @@ class Grade(Base):
     __tablename__ = "grade"
     id = Column(Integer, primary_key=True, index=True)
     student_id = Column(Integer, ForeignKey("student.id"), nullable=False)
-    subject_id = Column(Integer, ForeignKey("subject.id"), nullable=False)
+    discipline_group_id = Column(Integer, ForeignKey("discipline_group.id"), nullable=False)
     control_type_id = Column(Integer, ForeignKey("control_type.id"), nullable=False)
-    value = Column(Float, nullable=False)  # Шкала 0-5
+    value = Column(Float, nullable=False)
     date = Column(Date, default=datetime.date.today)
     teacher_id = Column(Integer, ForeignKey("teacher.id"), nullable=True)
 
     student = relationship("Student", back_populates="grades")
-    subject = relationship("Subject")
+    discipline_group = relationship("DisciplineGroup", back_populates="grades")
     control_type = relationship("ControlType")
     teacher = relationship("Teacher", back_populates="grades")
     history = relationship("GradeHistory", back_populates="grade", order_by="GradeHistory.changed_at.desc()")
 
     def __repr__(self):
-        return f"<Grade student_id={self.student_id} subject_id={self.subject_id} value={self.value}>"
+        return f"<Grade student_id={self.student_id} discipline_group_id={self.discipline_group_id} value={self.value}>"
 
 
 class GradeHistory(Base):
@@ -180,12 +276,12 @@ class Attendance(Base):
     __tablename__ = "attendance"
     id = Column(Integer, primary_key=True, index=True)
     student_id = Column(Integer, ForeignKey("student.id"), nullable=False)
-    group_subject_id = Column(Integer, ForeignKey("group_subject.id"), nullable=False)
+    discipline_group_id = Column(Integer, ForeignKey("discipline_group.id"), nullable=False)
     date = Column(Date, default=datetime.date.today)
-    status = Column(String, nullable=False)  # 'present', 'absent', 'late'
+    status = Column(String, nullable=False)
 
     student = relationship("Student", back_populates="attendance")
-    group_subject = relationship("GroupSubject", back_populates="attendances")
+    discipline_group = relationship("DisciplineGroup", back_populates="attendances")
 
     def __repr__(self):
         return f"<Attendance student_id={self.student_id} date={self.date} status={self.status}>"
@@ -197,29 +293,51 @@ class Appeal(Base):
     student_id = Column(Integer, ForeignKey("student.id"), nullable=False)
     subject_id = Column(Integer, ForeignKey("subject.id"), nullable=False)
     description = Column(String, nullable=False)
-    status = Column(String, default="pending", nullable=False)  # pending, approved, rejected
-    comment = Column(String, nullable=True)  # Комментарий администратора
+    status_id = Column(Integer, ForeignKey("appeal_status.id"), nullable=False)
+    comment = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     student = relationship("Student", back_populates="appeals")
     subject = relationship("Subject")
+    status = relationship("AppealStatus")
 
     def __repr__(self):
-        return f"<Appeal id={self.id} student_id={self.student_id} status={self.status}>"
+        return f"<Appeal id={self.id} student_id={self.student_id} status_id={self.status_id}>"
 
 
 class StudentStats(Base):
     __tablename__ = "student_stats"
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey("student.id"), unique=True, nullable=False)
+    student_id = Column(Integer, ForeignKey("student.id"), nullable=False)
+    semester_id = Column(Integer, ForeignKey("semester.id"), nullable=False)
     gpa = Column(Float, default=0.0)
     total_grades = Column(Integer, default=0)
 
     student = relationship("Student", back_populates="stats")
+    semester = relationship("Semester")
 
     def __repr__(self):
-        return f"<StudentStats student_id={self.student_id} gpa={self.gpa}>"
+        return f"<StudentStats student_id={self.student_id} semester_id={self.semester_id} gpa={self.gpa}>"
+
+
+class Main(Base):
+    __tablename__ = "main"
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("student.id"), nullable=False)
+    discipline_group_id = Column(Integer, ForeignKey("discipline_group.id"), nullable=False)
+    control_type_id = Column(Integer, ForeignKey("control_type.id"), nullable=False)
+    value = Column(Float, nullable=False)
+    date = Column(Date, default=datetime.date.today)
+    teacher_id = Column(Integer, ForeignKey("teacher.id"), nullable=True)
+
+    student = relationship("Student")
+    discipline_group = relationship("DisciplineGroup")
+    control_type = relationship("ControlType")
+    teacher = relationship("Teacher")
+
+    def __repr__(self):
+        return f"<Main student_id={self.student_id} discipline_group_id={self.discipline_group_id} value={self.value}>"
 
 
 class UserStudentLink(Base):

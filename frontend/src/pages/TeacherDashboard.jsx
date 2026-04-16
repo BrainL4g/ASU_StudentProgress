@@ -95,7 +95,7 @@ function GradeHistoryModal({ grade, onClose }) {
           <div className="text-sm text-gray-500 dark:text-gray-400">Текущая оценка</div>
           <div className="text-2xl font-bold text-gray-900 dark:text-white">{grade.value}</div>
           <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-            {grade.subject?.name} — {grade.control_type?.name}
+            {grade.discipline_group?.discipline?.name} — {grade.control_type?.name}
           </div>
         </div>
 
@@ -339,7 +339,7 @@ export default function TeacherDashboard() {
     try {
       await apiTeacherPost('grades', {
         student_id: parseInt(selectedStudentId),
-        subject_id: parseInt(selectedSubjectId),
+        discipline_group_id: parseInt(selectedSubjectId),
         control_type_id: parseInt(gradeControlTypeId),
         value: parseFloat(gradeValue)
       })
@@ -368,7 +368,7 @@ export default function TeacherDashboard() {
       setAttendanceStatus({ type: 'error', message: 'Сначала выберите группу и дисциплину' }); return
     }
     
-    // Find the group_subject_id for the selected group and subject
+    // Find the discipline_group_id for the selected group and subject
     const gs = myGroupSubjects.find(
       g => g.group_id === parseInt(selectedGroupId) && g.subject_id === parseInt(selectedSubjectId)
     )
@@ -380,7 +380,7 @@ export default function TeacherDashboard() {
     try {
       await apiTeacherPost('attendance', {
         student_id: studentId,
-        group_subject_id: gs.id,
+        discipline_group_id: gs.id,
         date: attendanceDate,
         status
       })
@@ -417,20 +417,20 @@ export default function TeacherDashboard() {
     return 'text-red-600'
   }
 
-  // Filter grades based on selected group and subject
+  // Filter grades based on selected group and discipline
   const filteredGrades = useMemo(() => {
     if (!selectedGroupId && !selectedSubjectId) return grades
     
     return grades.filter(g => {
-      if (selectedSubjectId && g.subject_id !== parseInt(selectedSubjectId)) return false
-      // Check if grade's student is in selected group
-      if (selectedGroupId) {
-        const studentInGrades = students.find(s => s.id === g.student_id)
-        if (studentInGrades && studentInGrades.group_id !== parseInt(selectedGroupId)) return false
+      // Filter by discipline_group if selected
+      if (selectedSubjectId && g.discipline_group_id !== parseInt(selectedSubjectId)) return false
+      // Check if grade's discipline_group is in selected group
+      if (selectedGroupId && g.discipline_group) {
+        if (g.discipline_group.group_id !== parseInt(selectedGroupId)) return false
       }
       return true
     })
-  }, [grades, selectedGroupId, selectedSubjectId, students])
+  }, [grades, selectedGroupId, selectedSubjectId])
 
   if (loading) return <Spinner />
 
@@ -558,7 +558,7 @@ export default function TeacherDashboard() {
                       <option value="">— Студент —</option>
                       {students.map(s => (
                         <option key={s.id} value={s.id}>
-                          {getStudentFullName(s)} ({s.group?.name ?? 'Без группы'})
+                          {getStudentFullName(s)} {s.group?.name ? `(${s.group.name})` : ''}
                         </option>
                       ))}
                     </select>
@@ -574,7 +574,7 @@ export default function TeacherDashboard() {
                   </div>
                   <div>
                     <label className={labelCls()}>Оценка (0–5)</label>
-                    <input type="number" min="0" max="5" step="0.1"
+                    <input type="number" min="0" max="5" step="1"
                       value={gradeValue}
                       onChange={e => setGradeValue(e.target.value)}
                       className={inputCls()} />
@@ -617,7 +617,7 @@ export default function TeacherDashboard() {
                         {filteredGrades.map(g => (
                           <tr key={g.id} className="border-b border-gray-50 dark:border-dark-input last:border-0 hover:bg-gray-50 dark:hover:bg-dark-input transition-colors">
                             <td className="py-3 pr-4 font-semibold text-gray-800 dark:text-dark-text">#{g.student_id}</td>
-                            <td className="py-3 pr-4 text-gray-600 dark:text-dark-muted">{g.subject?.name ?? `Предмет #${g.subject_id}`}</td>
+                            <td className="py-3 pr-4 text-gray-600 dark:text-dark-muted">{g.discipline_group?.discipline?.name || '—'}</td>
                             <td className="py-3 pr-4 text-gray-500 dark:text-dark-muted">{g.control_type?.name ?? `Тип #${g.control_type_id}`}</td>
                             <td className={`py-3 pr-4 font-bold ${getGradeColor(g.value)}`}>{g.value}</td>
                             <td className="py-3 pr-4 text-gray-400 dark:text-dark-muted">{g.date ?? '—'}</td>
@@ -744,7 +744,7 @@ export default function TeacherDashboard() {
                           <tr key={a.id} className="border-b border-gray-50 dark:border-dark-input last:border-0 hover:bg-gray-50 dark:hover:bg-dark-input transition-colors">
                             <td className="py-3 pr-4 font-semibold text-gray-800 dark:text-dark-text">#{a.student_id}</td>
                             <td className="py-3 pr-4 text-gray-600 dark:text-dark-muted">
-                              {a.group_subject?.subject?.name ?? `Дисциплина #${a.group_subject_id}`}
+                              {a.discipline_group?.discipline?.name || '—'}
                             </td>
                             <td className="py-3 pr-4 text-gray-400 dark:text-dark-muted">{a.date ?? '—'}</td>
                             <td className="py-3">

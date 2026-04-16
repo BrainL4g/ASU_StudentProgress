@@ -23,16 +23,75 @@ class UserRoleSchema(BaseModel):
         from_attributes = True
 
 
+class AppealStatusSchema(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AppealStatusCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class FacultySchema(BaseModel):
+    id: int
+    name: str
+    code: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class FacultyCreate(BaseModel):
+    name: str
+    code: Optional[str] = None
+
+
+class SpecializationSchema(BaseModel):
+    id: int
+    name: str
+    code: Optional[str] = None
+    faculty_id: int
+    faculty: Optional[FacultySchema] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SpecializationCreate(BaseModel):
+    name: str
+    code: Optional[str] = None
+    faculty_id: int
+
+
+class EnrollmentReasonSchema(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EnrollmentReasonCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
 class UserRegister(BaseModel):
     """Схема регистрации с валидацией."""
     username: str = Field(..., min_length=3, max_length=50)
     email: str = Field(..., min_length=5, max_length=100)
     password: str = Field(..., min_length=6, max_length=100)
     role: str = Field(default='student')
-    # ФИО (необязательные)
     first_name: Optional[str] = Field(None, min_length=2, max_length=100)
     last_name: Optional[str] = Field(None, min_length=2, max_length=100)
     patronymic: Optional[str] = Field(None, min_length=2, max_length=100)
+    group_id: Optional[int] = Field(None, description="ID группы для студента")
 
     @field_validator('username')
     @classmethod
@@ -129,11 +188,15 @@ class GroupSchema(BaseModel):
 class GroupCreate(BaseModel):
     name: str
     course: Optional[str] = None
+    faculty_id: int
+    specialization_id: int
 
 
 class GroupUpdate(BaseModel):
     name: Optional[str] = None
     course: Optional[str] = None
+    faculty_id: Optional[int] = None
+    specialization_id: Optional[int] = None
 
 
 # ──── Subject schemas ────
@@ -197,9 +260,32 @@ class ControlTypeCreate(BaseModel):
 
 # ──── Student schemas ────
 
+class StudentGroupSchema(BaseModel):
+    id: int
+    student_id: int
+    group_id: int
+    reason_id: int
+    enrollment_date: Optional[datetime.date] = None
+    dropout_date: Optional[datetime.date] = None
+    is_current: bool = False
+    group: Optional[GroupSchema] = None
+    reason: Optional[EnrollmentReasonSchema] = None
+
+    class Config:
+        from_attributes = True
+
+
+class StudentGroupCreate(BaseModel):
+    student_id: int
+    group_id: int
+    reason_id: int
+    enrollment_date: Optional[datetime.date] = None
+    dropout_date: Optional[datetime.date] = None
+    is_current: bool = False
+
+
 class StudentSchema(BaseModel):
     id: int
-    group_id: Optional[int] = None
     enrollment_year: Optional[int] = None
 
     class Config:
@@ -207,12 +293,11 @@ class StudentSchema(BaseModel):
 
 
 class StudentCreate(BaseModel):
-    group_id: Optional[int] = None
     enrollment_year: Optional[int] = None
+    groups: Optional[List[StudentGroupCreate]] = []
 
 
 class StudentUpdate(BaseModel):
-    group_id: Optional[int] = None
     enrollment_year: Optional[int] = None
 
 
@@ -284,17 +369,46 @@ class GroupSubjectSchema(BaseModel):
         from_attributes = True
 
 
+# ──── DisciplineGroup schemas ────
+
+class DisciplineGroupSchema(BaseModel):
+    id: int
+    discipline_id: int
+    group_id: int
+    teacher_id: Optional[int] = None
+    semester_id: int
+    academic_year: Optional[str] = None
+    discipline: Optional[SubjectSchema] = None
+    group: Optional[GroupSchema] = None
+    semester: Optional[SemesterSchema] = None
+    teacher: Optional[TeacherSchema] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DisciplineGroupCreate(BaseModel):
+    discipline_id: int
+    group_id: int
+    teacher_id: Optional[int] = None
+    semester_id: int
+    academic_year: Optional[str] = None
+
+
 # ──── Grade schemas ────
 
 class GradeBase(BaseModel):
     student_id: int
-    subject_id: int
+    discipline_group_id: int
     control_type_id: int
     value: float = Field(ge=0, le=5, description="Оценка от 0 до 5")
 
 
-class GradeCreate(GradeBase):
-    pass
+class GradeCreate(BaseModel):
+    student_id: int
+    discipline_group_id: int
+    control_type_id: int
+    value: int = Field(ge=0, le=5, description="Оценка от 0 до 5")
 
 
 class GradeUpdate(BaseModel):
@@ -305,12 +419,12 @@ class GradeUpdate(BaseModel):
 class GradeSchema(BaseModel):
     id: int
     student_id: int
-    subject_id: int
+    discipline_group_id: int
     control_type_id: int
     value: float
     date: Optional[datetime.date] = None
     teacher_id: Optional[int] = None
-    subject: Optional[SubjectSchema] = None
+    discipline_group: Optional[DisciplineGroupSchema] = None
     control_type: Optional[ControlTypeSchema] = None
     history: List["GradeHistorySchema"] = []
 
@@ -340,7 +454,7 @@ class GradeWithHistory(BaseModel):
 
 class AttendanceBase(BaseModel):
     student_id: int
-    group_subject_id: int
+    discipline_group_id: int
     date: Optional[datetime.date] = None
     status: str = Field(..., pattern="^(present|absent|late)$")
 
@@ -356,9 +470,10 @@ class AttendanceUpdate(BaseModel):
 class AttendanceSchema(BaseModel):
     id: int
     student_id: int
-    group_subject_id: int
+    discipline_group_id: int
     date: Optional[datetime.date] = None
     status: str
+    discipline_group: Optional[DisciplineGroupSchema] = None
 
     class Config:
         from_attributes = True
@@ -376,8 +491,8 @@ class AppealCreate(AppealBase):
 
 
 class AppealUpdate(BaseModel):
-    status: Optional[str] = None
-    comment: Optional[str] = None  # Комментарий администратора
+    status_id: Optional[int] = None
+    comment: Optional[str] = None
 
 
 class AppealSchema(BaseModel):
@@ -385,11 +500,12 @@ class AppealSchema(BaseModel):
     student_id: int
     subject_id: int
     description: Optional[str] = None
-    status: str
+    status_id: int
     comment: Optional[str] = None
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
     subject: Optional[SubjectSchema] = None
+    status: Optional[AppealStatusSchema] = None
 
     class Config:
         from_attributes = True
@@ -400,11 +516,20 @@ class AppealSchema(BaseModel):
 class StudentStatsSchema(BaseModel):
     id: int
     student_id: int
+    semester_id: int
     gpa: float
     total_grades: int
+    semester: Optional[SemesterSchema] = None
 
     class Config:
         from_attributes = True
+
+
+class StudentStatsCreate(BaseModel):
+    student_id: int
+    semester_id: int
+    gpa: float = 0.0
+    total_grades: int = 0
 
 
 # ──── Link schemas ────

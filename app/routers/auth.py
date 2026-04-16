@@ -144,7 +144,6 @@ def register(payload: schemas.UserRegister, db: Session = Depends(get_db)):
     if payload.role == "student":
         # Создаём студента
         student = models.Student(
-            group_id=None,
             enrollment_year=datetime.datetime.now().year
         )
         db.add(student)
@@ -158,6 +157,23 @@ def register(payload: schemas.UserRegister, db: Session = Depends(get_db)):
         )
         db.add(link)
         db.commit()
+        
+        # Если указана группа - создаём StudentGroup
+        if payload.group_id:
+            # Находим основание "Поступление"
+            reason = db.query(models.EnrollmentReason).filter(
+                models.EnrollmentReason.name == "Поступление"
+            ).first()
+            
+            sg = models.StudentGroup(
+                student_id=student.id,
+                group_id=payload.group_id,
+                reason_id=reason.id if reason else 1,
+                enrollment_date=datetime.date.today(),
+                is_current=True
+            )
+            db.add(sg)
+            db.commit()
         
         profile_info = {
             "student_id": student.id,

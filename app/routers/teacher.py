@@ -12,42 +12,46 @@ from ..schemas import (
     GradeSchema, GradeCreate, GradeUpdate, GradeHistorySchema, GradeWithHistory,
     AttendanceSchema, AttendanceCreate, AttendanceUpdate,
     StudentWithGroup, SubjectSchema, GroupSubjectSchema,
-    ControlTypeSchema,
+    ControlTypeSchema, StudentGroupSchema,
 )
 
 router = APIRouter(prefix="/teacher", tags=["teacher"])
 
 
-def verify_teacher_has_access_to_group_subject(
+def verify_teacher_has_access_to_discipline_group(
     db: Session,
     teacher_id: int,
-    group_id: int,
-    subject_id: int
+    discipline_group_id: int
 ) -> bool:
     """Проверить, что преподаватель ведёт данную дисциплину у группы."""
-    gs = db.query(models.GroupSubject).filter(
-        models.GroupSubject.teacher_id == teacher_id,
-        models.GroupSubject.group_id == group_id,
-        models.GroupSubject.subject_id == subject_id
+    dg = db.query(models.DisciplineGroup).filter(
+        models.DisciplineGroup.id == discipline_group_id,
+        models.DisciplineGroup.teacher_id == teacher_id
     ).first()
-    return gs is not None
+    return dg is not None
 
 
-def verify_teacher_has_access_to_student(
+def get_students_in_discipline_group(
     db: Session,
-    teacher_id: int,
-    student_id: int
-) -> bool:
-    """Проверить, что преподаватель ведёт хотя бы одну дисциплину у группы студента."""
-    student = db.query(models.Student).filter(models.Student.id == student_id).first()
-    if not student or not student.group_id:
-        return False
-    
-    gs = db.query(models.GroupSubject).filter(
-        models.GroupSubject.teacher_id == teacher_id,
-        models.GroupSubject.group_id == student.group_id
+    discipline_group_id: int
+) -> List[models.Student]:
+    """Получить студентов дисциплины-группы через StudentGroup."""
+    dg = db.query(models.GroupSubject).filter(
+        models.GroupSubject.id == discipline_group_id
     ).first()
-    return gs is not None
+    if not dg:
+        return []
+    
+    student_ids = db.query(models.StudentGroup.student_id).filter(
+        models.StudentGroup.group_id == dg.group_id,
+        models.StudentGroup.is_current == True
+    ).distinct().all()
+    student_ids = [s[0] for s in student_ids]
+    
+    if not student_ids:
+        return []
+    
+    return db.query(models.Student).filter(models.Student.id.in_(student_ids)).all()
 
 
 @router.get("/my-group-subjects", response_model=List[GroupSubjectSchema])
@@ -71,8 +75,8 @@ def get_my_students(
     db: Session = Depends(get_db),
     teacher: models.Teacher = Depends(get_current_teacher)
 ):
-    """Получить студентов, которым преподаватель выставлял оценки."""
-    # Получаем группы, где преподаватель ведёт дисциплины
+    """Получить студентов, которым преподаватель ведёт дисциплины."""
+    # Получаем группы через DisciplineGroup
     group_ids = db.query(models.GroupSubject.group_id).filter(
         models.GroupSubject.teacher_id == teacher.id
     ).distinct().all()
@@ -81,11 +85,40 @@ def get_my_students(
     if not group_ids:
         return []
     
-    students = db.query(models.Student).filter(
-        models.Student.group_id.in_(group_ids)
-    ).all()
+    # Получаем студентов через StudentGroup (текущие)
+    student_ids = db.query(models.StudentGroup.student_id).filter(
+        models.StudentGroup.group_id.in_(group_ids),
+        models.StudentGroup.is_current == True
+    ).distinct().all()
+    student_ids = [s[0] for s in student_ids]
     
-    return students
+    if not student_ids:
+        return []
+    
+    # Получаем студентов
+    students = db.query(models.Student).filter(models.Student.id.in_(student_ids)).all()
+    
+    # Добавляем информацию о группе
+    result = []
+    for s in students:
+        current_sg = db.query(models.StudentGroup).filter(
+            models.StudentGroup.student_id == s.id,
+            models.StudentGroup.is_current == True
+        ).first()
+        
+        group = None
+        if current_sg:
+            group = db.query(models.Group).filter(models.Group.id == current_sg.group_id).first()
+        
+        result.append({
+            "id": s.id,
+            "group_id": current_sg.group_id if current_sg else None,
+            "enrollment_year": s.enrollment_year,
+            "group": {"id": group.id, "name": group.name} if group else None,
+            "user_account": None
+        })
+    
+    return result
 
 
 @router.get("/subjects", response_model=List[SubjectSchema])
@@ -131,32 +164,41 @@ def get_students_by_group(
     teacher: models.Teacher = Depends(get_current_teacher)
 ):
     """Получить студентов по ID группы (только если преподаватель ведёт дисциплины в этой группе)."""
-    # Проверяем, что преподаватель ведёт дисциплины в этой группе
-    gs = db.query(models.GroupSubject).filter(
+    # Проверяем через DisciplineGroup
+    dg = db.query(models.GroupSubject).filter(
         models.GroupSubject.teacher_id == teacher.id,
         models.GroupSubject.group_id == group_id
     ).first()
     
-    if not gs:
+    if not dg:
         raise HTTPException(
             status_code=403,
             detail="У вас нет дисциплин в этой группе"
         )
     
-    students = db.query(models.Student).options(
-        joinedload(models.Student.group)
-    ).filter(
-        models.Student.group_id == group_id
-    ).all()
+    # Получаем студентов через StudentGroup
+    student_ids = db.query(models.StudentGroup.student_id).filter(
+        models.StudentGroup.group_id == group_id,
+        models.StudentGroup.is_current == True
+    ).distinct().all()
+    student_ids = [s[0] for s in student_ids]
+    
+    if not student_ids:
+        return []
+    
+    students = db.query(models.Student).filter(models.Student.id.in_(student_ids)).all()
+    
+    # Получаем группу
+    group = db.query(models.Group).filter(models.Group.id == group_id).first()
     
     # Добавляем информацию о пользователе к каждому студенту
     result = []
     for student in students:
         student_dict = {
             "id": student.id,
-            "group_id": student.group_id,
+            "group_id": group_id,
             "enrollment_year": student.enrollment_year,
-            "group": student.group,
+            "group": {"id": group.id, "name": group.name} if group else None,
             "user_account": None
         }
         # Получаем связь с пользователем
@@ -184,7 +226,7 @@ def get_all_grades(
 ):
     """Получить все оценки преподавателя."""
     grades = db.query(models.Grade).options(
-        joinedload(models.Grade.subject),
+        joinedload(models.Grade.discipline_group).joinedload(models.DisciplineGroup.discipline),
         joinedload(models.Grade.control_type),
     ).filter(
         models.Grade.teacher_id == teacher.id
@@ -204,19 +246,36 @@ def assign_grade(
     if not student:
         raise HTTPException(status_code=404, detail="Студент не найден")
     
-    if not student.group_id:
-        raise HTTPException(status_code=400, detail="Студент не привязан к группе")
-    
-    # Проверяем, что преподаватель ведёт эту дисциплину в группе студента
-    if not verify_teacher_has_access_to_group_subject(db, teacher.id, student.group_id, grade_data.subject_id):
+    # Проверяем, что преподаватель ведёт эту дисциплину
+    if not verify_teacher_has_access_to_discipline_group(db, teacher.id, grade_data.discipline_group_id):
         raise HTTPException(
             status_code=403,
-            detail="Вы не ведёте эту дисциплину в группе данного студента"
+            detail="Вы не ведёте эту дисциплину"
+        )
+    
+    # Проверяем, что студент в этой группе
+    dg = db.query(models.DisciplineGroup).filter(
+        models.DisciplineGroup.id == grade_data.discipline_group_id
+    ).first()
+    
+    if not dg:
+        raise HTTPException(status_code=404, detail="Дисциплина-группа не найдена")
+    
+    student_in_group = db.query(models.StudentGroup).filter(
+        models.StudentGroup.student_id == student.id,
+        models.StudentGroup.group_id == dg.group_id,
+        models.StudentGroup.is_current == True
+    ).first()
+    
+    if not student_in_group:
+        raise HTTPException(
+            status_code=403,
+            detail="Студент не принадлежит к этой группе"
         )
     
     existing = db.query(models.Grade).filter(
         models.Grade.student_id == grade_data.student_id,
-        models.Grade.subject_id == grade_data.subject_id,
+        models.Grade.discipline_group_id == grade_data.discipline_group_id,
         models.Grade.control_type_id == grade_data.control_type_id
     ).first()
     
@@ -228,7 +287,7 @@ def assign_grade(
     
     grade = models.Grade(
         student_id=grade_data.student_id,
-        subject_id=grade_data.subject_id,
+        discipline_group_id=grade_data.discipline_group_id,
         control_type_id=grade_data.control_type_id,
         value=grade_data.value,
         teacher_id=teacher.id,
@@ -248,7 +307,7 @@ def get_grade_with_history(
 ):
     """Получить оценку с историей изменений."""
     grade = db.query(models.Grade).options(
-        joinedload(models.Grade.subject),
+        joinedload(models.Grade.discipline_group).joinedload(models.DisciplineGroup.discipline),
         joinedload(models.Grade.control_type),
     ).filter(
         models.Grade.id == grade_id,
@@ -320,20 +379,20 @@ def delete_grade(
 
 @router.get("/attendance", response_model=List[AttendanceSchema])
 def get_attendance_records(
-    group_subject_id: int = None,
+    discipline_group_id: int = None,
     db: Session = Depends(get_db),
     teacher: models.Teacher = Depends(get_current_teacher)
 ):
     """Получить записи посещаемости (только по дисциплинам преподавателя)."""
     query = db.query(models.Attendance).join(
         models.GroupSubject,
-        models.Attendance.group_subject_id == models.GroupSubject.id
+        models.Attendance.discipline_group_id == models.GroupSubject.id
     ).filter(
         models.GroupSubject.teacher_id == teacher.id
     )
     
-    if group_subject_id:
-        query = query.filter(models.Attendance.group_subject_id == group_subject_id)
+    if discipline_group_id:
+        query = query.filter(models.Attendance.discipline_group_id == discipline_group_id)
     
     return query.all()
 
@@ -345,25 +404,26 @@ def mark_attendance(
     teacher: models.Teacher = Depends(get_current_teacher)
 ):
     """Отметить посещаемость."""
-    # Проверяем, что преподаватель ведёт эту дисциплину
-    gs = db.query(models.GroupSubject).filter(
-        models.GroupSubject.id == attendance_data.group_subject_id,
+    # Проверяем через DisciplineGroup
+    dg = db.query(models.GroupSubject).filter(
+        models.GroupSubject.id == attendance_data.discipline_group_id,
         models.GroupSubject.teacher_id == teacher.id
     ).first()
     
-    if not gs:
+    if not dg:
         raise HTTPException(
             status_code=403,
             detail="Вы не ведёте эту дисциплину"
         )
-
-    # Проверяем, что студент в этой группе
-    student = db.query(models.Student).filter(
-        models.Student.id == attendance_data.student_id,
-        models.Student.group_id == gs.group_id
+    
+    # Проверяем, что студент в этой группе через StudentGroup
+    student_in_group = db.query(models.StudentGroup).filter(
+        models.StudentGroup.student_id == attendance_data.student_id,
+        models.StudentGroup.group_id == dg.group_id,
+        models.StudentGroup.is_current == True
     ).first()
 
-    if not student:
+    if not student_in_group:
         raise HTTPException(
             status_code=403,
             detail="Студент не принадлежит к этой группе"
@@ -371,7 +431,7 @@ def mark_attendance(
     
     existing = db.query(models.Attendance).filter(
         models.Attendance.student_id == attendance_data.student_id,
-        models.Attendance.group_subject_id == attendance_data.group_subject_id,
+        models.Attendance.discipline_group_id == attendance_data.discipline_group_id,
         models.Attendance.date == (attendance_data.date or datetime.date.today())
     ).first()
     
@@ -383,7 +443,7 @@ def mark_attendance(
     
     attendance = models.Attendance(
         student_id=attendance_data.student_id,
-        group_subject_id=attendance_data.group_subject_id,
+        discipline_group_id=attendance_data.discipline_group_id,
         date=attendance_data.date or datetime.date.today(),
         status=attendance_data.status
     )
@@ -403,7 +463,7 @@ def update_attendance(
     """Редактировать запись посещаемости (только свои дисциплины)."""
     attendance = db.query(models.Attendance).join(
         models.GroupSubject,
-        models.Attendance.group_subject_id == models.GroupSubject.id
+        models.Attendance.discipline_group_id == models.GroupSubject.id
     ).filter(
         models.Attendance.id == attendance_id,
         models.GroupSubject.teacher_id == teacher.id
@@ -427,7 +487,7 @@ def delete_attendance(
     """Удалить запись посещаемости (только свои дисциплины)."""
     attendance = db.query(models.Attendance).join(
         models.GroupSubject,
-        models.Attendance.group_subject_id == models.GroupSubject.id
+        models.Attendance.discipline_group_id == models.GroupSubject.id
     ).filter(
         models.Attendance.id == attendance_id,
         models.GroupSubject.teacher_id == teacher.id
@@ -444,14 +504,14 @@ def delete_attendance(
 @router.get("/group-student-attendance")
 def get_student_attendance(
     student_id: int,
-    group_subject_id: int,
+    discipline_group_id: int,
     db: Session = Depends(get_db),
     teacher: models.Teacher = Depends(get_current_teacher)
 ):
     """Получить посещаемость конкретного студента по дисциплине."""
     # Проверяем доступ
     gs = db.query(models.GroupSubject).filter(
-        models.GroupSubject.id == group_subject_id,
+        models.GroupSubject.id == discipline_group_id,
         models.GroupSubject.teacher_id == teacher.id
     ).first()
     
@@ -460,7 +520,7 @@ def get_student_attendance(
     
     records = db.query(models.Attendance).filter(
         models.Attendance.student_id == student_id,
-        models.Attendance.group_subject_id == group_subject_id
+        models.Attendance.discipline_group_id == discipline_group_id
     ).order_by(models.Attendance.date.desc()).all()
     return records
 
@@ -621,7 +681,7 @@ def export_all_grades(
 ):
     """Экспорт всех оценок преподавателя в CSV."""
     grades = db.query(models.Grade).options(
-        joinedload(models.Grade.subject),
+        joinedload(models.Grade.discipline_group).joinedload(models.DisciplineGroup.discipline),
         joinedload(models.Grade.control_type),
         joinedload(models.Grade.student),
     ).filter(
@@ -646,10 +706,11 @@ def export_all_grades(
         student_name = _get_person_name(
             db, db.query(models.UserStudentLink).filter(models.UserStudentLink.student_id == g.student_id)
         )
+        subject_name = g.discipline_group.discipline.name if g.discipline_group and g.discipline_group.discipline else "N/A"
         writer.writerow([
             i,
             student_name,
-            g.subject.name if g.subject else "N/A",
+            subject_name,
             g.control_type.name if g.control_type else "N/A",
             g.value,
             g.date.strftime("%d.%m.%Y") if g.date else "",
@@ -686,7 +747,7 @@ def export_attendance(
     subject = db.query(models.Subject).filter(models.Subject.id == subject_id).first()
 
     records = db.query(models.Attendance).filter(
-        models.Attendance.group_subject_id == gs.id
+        models.Attendance.discipline_group_id == gs.id
     ).order_by(models.Attendance.date.desc()).all()
 
     output = io.StringIO()
@@ -748,14 +809,14 @@ def export_group_summary(
 
     grades = db.query(models.Grade).options(
         joinedload(models.Grade.control_type),
-        joinedload(models.Grade.subject),
+        joinedload(models.Grade.discipline_group).joinedload(models.DisciplineGroup.discipline),
     ).filter(
         models.Grade.student_id.in_([s.id for s in students]),
         models.Grade.subject_id.in_(subject_ids)
     ).all()
 
     attendance_records = db.query(models.Attendance).filter(
-        models.Attendance.group_subject_id.in_([gs.id for gs in gs_list])
+        models.Attendance.discipline_group_id.in_([gs.id for gs in gs_list])
     ).all()
 
     output = io.StringIO()
@@ -772,7 +833,7 @@ def export_group_summary(
         writer.writerow(['№', 'Студент', 'Оценки', 'Средний балл', 'Присутствует', 'Отсутствует', '% посещаемости'])
 
         subj_grades = [g for g in grades if g.subject_id == gs.subject_id]
-        subj_att = [a for a in attendance_records if a.group_subject_id == gs.id]
+        subj_att = [a for a in attendance_records if a.discipline_group_id == gs.id]
 
         for i, student in enumerate(students, 1):
             student_name = _get_person_name(

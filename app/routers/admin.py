@@ -15,6 +15,13 @@ from ..schemas import (
     GroupSubjectSchema, GroupSubjectCreate,
     UserStudentLinkCreate, UserTeacherLinkCreate,
     AppealSchema, AppealUpdate,
+    AppealStatusSchema, AppealStatusCreate,
+    FacultySchema, FacultyCreate,
+    SpecializationSchema, SpecializationCreate,
+    EnrollmentReasonSchema, EnrollmentReasonCreate,
+    DisciplineGroupSchema, DisciplineGroupCreate,
+    StudentGroupSchema, StudentGroupCreate,
+    StudentStatsSchema, StudentStatsCreate,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -585,10 +592,229 @@ def update_appeal(
     appeal = db.query(models.Appeal).filter(models.Appeal.id == appeal_id).first()
     if not appeal:
         raise HTTPException(status_code=404, detail="Апелляция не найдена")
-    if appeal_update.status:
-        appeal.status = appeal_update.status
+    if appeal_update.status_id:
+        appeal.status_id = appeal_update.status_id
     if appeal_update.comment is not None:
         appeal.comment = appeal_update.comment
     db.commit()
     db.refresh(appeal)
     return appeal
+
+
+# === APPEAL STATUSES ===
+@router.get("/appeal-statuses", response_model=list[AppealStatusSchema])
+def list_appeal_statuses(
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.AppealStatus).all()
+
+
+@router.post("/appeal-statuses", response_model=AppealStatusSchema)
+def create_appeal_status(
+    status: AppealStatusCreate,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    existing = db.query(models.AppealStatus).filter(models.AppealStatus.name == status.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Статус уже существует")
+    db_status = models.AppealStatus(**status.dict())
+    db.add(db_status)
+    db.commit()
+    db.refresh(db_status)
+    return db_status
+
+
+# === FACULTIES ===
+@router.get("/faculties", response_model=list[FacultySchema])
+def list_faculties(
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.Faculty).all()
+
+
+@router.post("/faculties", response_model=FacultySchema)
+def create_faculty(
+    faculty: FacultyCreate,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    existing = db.query(models.Faculty).filter(models.Faculty.name == faculty.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Факультет уже существует")
+    db_faculty = models.Faculty(**faculty.dict())
+    db.add(db_faculty)
+    db.commit()
+    db.refresh(db_faculty)
+    return db_faculty
+
+
+# === SPECIALIZATIONS ===
+@router.get("/specializations", response_model=list[SpecializationSchema])
+def list_specializations(
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.Specialization).all()
+
+
+@router.get("/specializations/{faculty_id}", response_model=list[SpecializationSchema])
+def list_specializations_by_faculty(
+    faculty_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.Specialization).filter(models.Specialization.faculty_id == faculty_id).all()
+
+
+@router.post("/specializations", response_model=SpecializationSchema)
+def create_specialization(
+    spec: SpecializationCreate,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    faculty = db.query(models.Faculty).filter(models.Faculty.id == spec.faculty_id).first()
+    if not faculty:
+        raise HTTPException(status_code=404, detail="Факультет не найден")
+    db_spec = models.Specialization(**spec.dict())
+    db.add(db_spec)
+    db.commit()
+    db.refresh(db_spec)
+    return db_spec
+
+
+# === ENROLLMENT REASONS ===
+@router.get("/enrollment-reasons", response_model=list[EnrollmentReasonSchema])
+def list_enrollment_reasons(
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.EnrollmentReason).all()
+
+
+@router.post("/enrollment-reasons", response_model=EnrollmentReasonSchema)
+def create_enrollment_reason(
+    reason: EnrollmentReasonCreate,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    existing = db.query(models.EnrollmentReason).filter(models.EnrollmentReason.name == reason.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Основание уже существует")
+    db_reason = models.EnrollmentReason(**reason.dict())
+    db.add(db_reason)
+    db.commit()
+    db.refresh(db_reason)
+    return db_reason
+
+
+# === STUDENT GROUPS ===
+@router.get("/student-groups", response_model=list[StudentGroupSchema])
+def list_student_groups(
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.StudentGroup).all()
+
+
+@router.post("/student-groups", response_model=StudentGroupSchema)
+def create_student_group(
+    sg: StudentGroupCreate,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    student = db.query(models.Student).filter(models.Student.id == sg.student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Студент не найден")
+    
+    if sg.is_current:
+        existing_current = db.query(models.StudentGroup).filter(
+            models.StudentGroup.student_id == sg.student_id,
+            models.StudentGroup.is_current == True
+        ).all()
+        for ec in existing_current:
+            ec.is_current = False
+    
+    db_sg = models.StudentGroup(**sg.dict())
+    db.add(db_sg)
+    db.commit()
+    db.refresh(db_sg)
+    return db_sg
+
+
+@router.delete("/student-groups/{sg_id}")
+def delete_student_group(
+    sg_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    sg = db.query(models.StudentGroup).filter(models.StudentGroup.id == sg_id).first()
+    if not sg:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    db.delete(sg)
+    db.commit()
+    return {"message": "Запись удалена"}
+
+
+# === DISCIPLINE GROUPS ===
+@router.get("/discipline-groups", response_model=list[DisciplineGroupSchema])
+def list_discipline_groups(
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.DisciplineGroup).all()
+
+
+@router.get("/discipline-groups/by-group/{group_id}", response_model=list[DisciplineGroupSchema])
+def list_discipline_groups_by_group(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.DisciplineGroup).filter(models.DisciplineGroup.group_id == group_id).all()
+
+
+@router.post("/discipline-groups", response_model=DisciplineGroupSchema)
+def create_discipline_group(
+    dg: DisciplineGroupCreate,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    db_dg = models.DisciplineGroup(**dg.dict())
+    db.add(db_dg)
+    db.commit()
+    db.refresh(db_dg)
+    return db_dg
+
+
+# === STATS ===
+@router.get("/student-stats", response_model=list[StudentStatsSchema])
+def list_student_stats(
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.StudentStats).all()
+
+
+@router.get("/student-stats/by-student/{student_id}", response_model=list[StudentStatsSchema])
+def list_student_stats_by_student(
+    student_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    return db.query(models.StudentStats).filter(models.StudentStats.student_id == student_id).all()
+
+
+@router.post("/student-stats", response_model=StudentStatsSchema)
+def create_student_stats(
+    stats: StudentStatsCreate,
+    db: Session = Depends(get_db),
+    current_user: models.UserAccount = Depends(require_admin)
+):
+    db_stats = models.StudentStats(**stats.dict())
+    db.add(db_stats)
+    db.commit()
+    db.refresh(db_stats)
+    return db_stats
